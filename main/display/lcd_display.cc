@@ -17,6 +17,10 @@
 #include <vector>
 
 #include "board.h"
+#ifdef CONFIG_USE_TERMINAL_FACE
+#include <esp_random.h>
+#include "audio_codec.h"
+#endif
 
 #define TAG "LcdDisplay"
 
@@ -322,6 +326,15 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 }
 
 LcdDisplay::~LcdDisplay() {
+#ifdef CONFIG_USE_TERMINAL_FACE
+    {
+        DisplayLockGuard lock(this);
+        if (face_timer_)
+            lv_timer_delete(face_timer_);
+        if (face_root_)
+            lv_obj_delete(face_root_);
+    }
+#endif
     SetPreviewImage(nullptr);
 
     // Clean up GIF controller
@@ -414,6 +427,9 @@ void LcdDisplay::SetupUI() {
     }
 
     Display::SetupUI();  // Mark SetupUI as called
+#ifdef CONFIG_USE_TERMINAL_FACE
+    SetupTerminalFace();
+#endif
     DisplayLockGuard lock(this);
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -562,6 +578,9 @@ void LcdDisplay::SetupUI() {
 #define MAX_MESSAGES 20
 #endif
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+#ifdef CONFIG_USE_TERMINAL_FACE
+    TrackTerminalMessage(role, content);
+#endif
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!",
                  role, content);
@@ -887,6 +906,9 @@ void LcdDisplay::RemoveChatMessage(const char* role, const char* content) {
 
 void LcdDisplay::ClearChatMessages() {
     DisplayLockGuard lock(this);
+#ifdef CONFIG_USE_TERMINAL_FACE
+    face_system_message_ = false;
+#endif
     if (content_ == nullptr) {
         return;
     }
@@ -910,6 +932,9 @@ void LcdDisplay::SetupUI() {
     }
 
     Display::SetupUI();  // Mark SetupUI as called
+#ifdef CONFIG_USE_TERMINAL_FACE
+    SetupTerminalFace();
+#endif
     DisplayLockGuard lock(this);
     LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
     auto text_font = lvgl_theme->text_font()->font();
@@ -1135,6 +1160,9 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 }
 
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+#ifdef CONFIG_USE_TERMINAL_FACE
+    TrackTerminalMessage(role, content);
+#endif
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!",
                  role, content);
@@ -1184,6 +1212,9 @@ void LcdDisplay::RemoveChatMessage(const char* role, const char* content) {
 
 void LcdDisplay::ClearChatMessages() {
     DisplayLockGuard lock(this);
+#ifdef CONFIG_USE_TERMINAL_FACE
+    face_system_message_ = false;
+#endif
     // In non-wechat mode, just clear the chat message label and hide the bar
     if (chat_message_label_ != nullptr) {
         lv_label_set_text(chat_message_label_, "");
@@ -1195,6 +1226,22 @@ void LcdDisplay::ClearChatMessages() {
 #endif
 
 bool LcdDisplay::SetEmotion(const char* emotion) {
+#ifdef CONFIG_USE_TERMINAL_FACE
+    if (face_root_ && emotion) {
+        DisplayLockGuard lock(this);
+        static constexpr const char* names[] = {
+            "neutral", "happy", "laughing", "surprised",   "confused", "winking", "sleepy",
+            "sad",     "angry", "loving",   "embarrassed", "scared",   "dizzy",   "cool",
+        };
+        for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+            if (strcmp(emotion, names[i]) == 0) {
+                face_emotion_ = i;
+                face_emotion_tick_ = lv_tick_get();
+                break;
+            }
+        }
+    }
+#endif
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!",
                  emotion);
@@ -1455,3 +1502,202 @@ void LcdDisplay::SetHideSubtitle(bool hide) {
         }
     }
 }
+
+#ifdef CONFIG_USE_TERMINAL_FACE
+void LcdDisplay::SetupTerminalFace() {
+    DisplayLockGuard lock(this);
+    face_root_ = lv_obj_create(lv_display_get_screen_active(display_));
+    lv_obj_remove_style_all(face_root_);
+    lv_obj_remove_flag(face_root_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(face_root_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(face_root_, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(face_root_, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(face_root_, LV_OPA_COVER, 0);
+    lv_obj_add_flag(face_root_, LV_OBJ_FLAG_HIDDEN);
+
+    const auto ivory = lv_color_hex(0xffe9c9);
+    auto shape = [this, ivory]() {
+        auto object = lv_obj_create(face_root_);
+        lv_obj_remove_style_all(object);
+        lv_obj_remove_flag(object, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_color(object, ivory, 0);
+        lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
+        return object;
+    };
+    for (int i = 0; i < 2; ++i) {
+        face_eyes_[i] = shape();
+        lv_obj_set_style_bg_opa(face_eyes_[i], LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(face_eyes_[i], ivory, 0);
+        face_pupils_[i] = shape();
+        face_glints_[i] = shape();
+        face_cheeks_[i] = shape();
+    }
+    for (auto& dot : face_dots_) {
+        dot = shape();
+    }
+    for (auto& mark : face_scratch_) {
+        mark = shape();
+        lv_obj_add_flag(mark, LV_OBJ_FLAG_HIDDEN);
+    }
+    face_timer_ = lv_timer_create(
+        [](lv_timer_t* timer) {
+            static_cast<LcdDisplay*>(lv_timer_get_user_data(timer))->UpdateTerminalFace();
+        },
+        50, this);
+}
+
+void LcdDisplay::SetStatus(const char* status) {
+    LvglDisplay::SetStatus(status);
+    if (!status || !face_root_) {
+        return;
+    }
+    DisplayLockGuard lock(this);
+    const auto old = face_state_;
+    if (strcmp(status, Lang::Strings::STANDBY) == 0) {
+        face_state_ = Face::Idle;
+    } else if (strcmp(status, Lang::Strings::CONNECTING) == 0) {
+        face_state_ = Face::Connecting;
+    } else if (strcmp(status, Lang::Strings::LISTENING) == 0) {
+        face_state_ = Face::Listen;
+    } else if (strcmp(status, Lang::Strings::SPEAKING) == 0) {
+        face_state_ = Face::Speak;
+    } else if (!(old == Face::Idle && strlen(status) == 5 && status[2] == ':' &&
+                 strspn(status, "0123456789:") == 5)) {
+        face_state_ = Face::Hidden;
+    }
+    if (old != face_state_) {
+        face_state_tick_ = lv_tick_get();
+        face_gesture_ = 0;
+    }
+}
+
+void LcdDisplay::TrackTerminalMessage(const char* role, const char* content) {
+    if (!face_root_ || !role) {
+        return;
+    }
+    DisplayLockGuard lock(this);
+    if (strcmp(role, "system") == 0) {
+        face_system_message_ = content && *content;
+    } else if (strcmp(role, "user") == 0 && content && *content && face_state_ == Face::Listen) {
+        face_state_ = Face::Think;
+        face_state_tick_ = lv_tick_get();
+    }
+}
+
+void LcdDisplay::UpdateTerminalFace() {
+    if (face_state_ == Face::Think && lv_tick_elaps(face_state_tick_) >= 30000) {
+        face_state_ = Face::Listen;
+    }
+    const bool show =
+        face_state_ != Face::Hidden && !face_system_message_ &&
+        (!notification_label_ || lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) &&
+        (!preview_image_ || lv_obj_has_flag(preview_image_, LV_OBJ_FLAG_HIDDEN)) &&
+        (!low_battery_popup_ || lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN));
+    if (!show) {
+        lv_obj_add_flag(face_root_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (lv_obj_has_flag(face_root_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_move_foreground(face_root_);
+        lv_obj_remove_flag(face_root_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    const int width = lv_display_get_horizontal_resolution(display_);
+    const int height = lv_display_get_vertical_resolution(display_);
+    const int scale = std::min(width * 92 / 100, height * 400 / 280);
+    const int origin_x = (width - scale) / 2;
+    const int origin_y = (height - scale * 280 / 400) / 2;
+    auto place = [&](lv_obj_t* object, int x, int y, int w, int h, int radius) {
+        lv_obj_set_pos(object, origin_x + x * scale / 400, origin_y + y * scale / 400);
+        lv_obj_set_size(object, std::max(1, w * scale / 400), std::max(1, h * scale / 400));
+        const auto scaled_radius = radius * scale / 400;
+        if (lv_obj_get_style_radius(object, LV_PART_MAIN) != scaled_radius) {
+            lv_obj_set_style_radius(object, scaled_radius, LV_PART_MAIN);
+        }
+    };
+    const auto now = lv_tick_get();
+    auto elapsed = now - face_state_tick_;
+    unsigned emotion = now - face_emotion_tick_ < 3000 ? face_emotion_ : 0;
+    int gaze = 0;
+    if (face_state_ == Face::Idle && elapsed >= face_idle_delay_ + 1400) {
+        face_state_tick_ = now;
+        elapsed = 0;
+        face_idle_delay_ = 5500 + esp_random() % 5500;
+        face_gesture_ = 0;
+    }
+    if (face_state_ == Face::Idle && elapsed >= face_idle_delay_ && !face_gesture_) {
+        face_gesture_ = 1 + esp_random() % 4;
+    }
+    const auto gesture_ms = elapsed >= face_idle_delay_ ? elapsed - face_idle_delay_ : 0;
+    if (face_gesture_ == 1) {
+        gaze = gesture_ms < 450 ? -24 : gesture_ms < 950 ? 24 : 0;
+    } else if (face_gesture_ == 2) {
+        emotion = 4;
+    } else if (face_gesture_ == 3 && gesture_ms < 500) {
+        emotion = 5;
+    } else if (face_gesture_ == 4) {
+        emotion = 13;
+    }
+    const bool blink = face_state_ == Face::Idle && elapsed % 4200 >= 4050;
+    for (int i = 0; i < 2; ++i) {
+        const int x = 20 + i * 205;
+        const bool closed = blink || (emotion == 5 && i == 0);
+        const bool soft = emotion == 1 || emotion == 2 || emotion == 6 || emotion == 7 ||
+                          emotion == 8 || emotion == 10 || emotion == 13;
+        const int pupil_h = closed                          ? 5
+                            : soft                          ? 8
+                            : face_state_ == Face::Listen   ? 33
+                            : emotion == 3 || emotion == 11 ? 12
+                                                            : 23;
+        const int pupil_w = closed || soft ? 48 : emotion == 9 ? 32 : pupil_h;
+        place(face_eyes_[i], x, closed ? 108 : 45, 155, closed ? 24 : 150, 41);
+        const auto border = std::max(1, 9 * scale / 400);
+        if (lv_obj_get_style_border_width(face_eyes_[i], LV_PART_MAIN) != border) {
+            lv_obj_set_style_border_width(face_eyes_[i], border, LV_PART_MAIN);
+        }
+        place(face_glints_[i], x + 119, closed ? 113 : 66, 15, closed ? 5 : 15, 3);
+        const int drift = emotion == 12 ? ((elapsed / 130 + i) % 2 ? 12 : -12) : 0;
+        const int pupil_y = emotion == 4 || face_state_ == Face::Think ? 100 : soft ? 134 : 122;
+        place(face_pupils_[i], x + 77 - pupil_w / 2 + gaze + drift, pupil_y - pupil_h / 2, pupil_w,
+              pupil_h, soft ? 4 : 3);
+        place(face_cheeks_[i], i ? 343 : 44, emotion == 10 ? 220 : 232, 12, 12, 3);
+    }
+
+    static constexpr unsigned mouths[] = {0x001f, 0x009f, 0x01df, 0x3a3f};
+    unsigned dots = mouths[0];
+    if (face_state_ == Face::Speak) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        dots = mouths[codec ? codec->GetPlaybackMouthLevel() : 0];
+    } else if (face_state_ == Face::Think || face_state_ == Face::Connecting) {
+        dots = (1u << (1 + (elapsed / 240) % 3)) - 1;
+        dots <<= 1;
+    } else if (emotion == 1 || emotion == 2 || emotion == 9 || emotion == 13) {
+        dots = 0x01d1;
+    } else if (emotion == 3 || emotion == 11) {
+        dots = 0x11c4;
+    } else if (emotion == 7 || emotion == 8) {
+        dots = 0x022e;
+    } else if (emotion == 4 || emotion == 10) {
+        dots = 0x0004;
+    }
+    for (int i = 0; i < 15; ++i) {
+        auto dot = face_dots_[i];
+        if (dots & (1u << i)) {
+            place(dot, 158 + i % 5 * 18, 225 + i / 5 * 16, 12, 12, 3);
+            lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (face_gesture_ == 2) {
+            const int bounce = gesture_ms / 110 % 2 ? 5 : 0;
+            place(face_scratch_[i], 321 + i * 13, 22 - i * 7 + bounce, 8, 15, 4);
+            lv_obj_remove_flag(face_scratch_[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(face_scratch_[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+#endif

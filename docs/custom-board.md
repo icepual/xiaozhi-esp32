@@ -560,3 +560,17 @@ Any board can register custom tools - speaker control, screen brightness, batter
 - ESP-IDF documentation: https://docs.espressif.com/projects/esp-idf/
 - LVGL documentation: https://docs.lvgl.io/
 - ESP-SR documentation: https://github.com/espressif/esp-sr
+
+### Terminal robot face
+
+For a board using the default LVGL LCD UI, enable `CONFIG_USE_TERMINAL_FACE`
+to display the animated face. The option is off by default. For example,
+to build the 240×240 breadboard LCD variant:
+
+```sh
+python3 scripts/build.py bread-compact-esp32-lcd --name bread-compact-esp32-lcd \
+  --build-options-json '{"display_style":"default","terminal_face":true}'
+```
+
+Substitute your actual board and variant before flashing. Verify the screen
+orientation, system prompts, and speaking animation on hardware.

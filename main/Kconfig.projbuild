@@ -967,6 +967,13 @@ choice DISPLAY_STYLE
             || BOARD_TYPE_ESP_SENSAIRSHUTTLE || BOARD_TYPE_STACKCHAN
 endchoice
 
+config USE_TERMINAL_FACE
+    bool "Terminal robot face on LVGL LCD"
+    depends on USE_DEFAULT_MESSAGE_STYLE
+    default n
+    help
+        Show a full-screen animated robot face on LCD boards using the default LVGL UI.
+
 config JC4827W543_EXTERNAL_AMP
     bool "JC4827W543: external I2S amplifier instead of the on-board NS4168"
     depends on BOARD_TYPE_GUITION_JC4827W543

@@ -1,4 +1,5 @@
 #include "audio_codec.h"
+#include <esp_timer.h>
 #include "board.h"
 #include "settings.h"
 
@@ -15,8 +16,29 @@ AudioCodec::~AudioCodec() {
 }
 
 void AudioCodec::OutputData(std::vector<int16_t>& data) {
+#ifdef CONFIG_USE_TERMINAL_FACE
+    unsigned sum = 0;
+    unsigned count = 0;
+    for (size_t i = 0; i < data.size(); i += 16) {
+        const int sample = data[i];
+        sum += sample < 0 ? -sample : sample;
+        ++count;
+    }
+    const unsigned level = count ? sum / count : 0;
+    const unsigned mouth = level > 3200 ? 3 : level > 1200 ? 2 : level > 350 ? 1 : 0;
+    const auto ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    playback_mouth_.store((ms & ~3u) | mouth, std::memory_order_relaxed);
+#endif
     Write(data.data(), data.size());
 }
+
+#ifdef CONFIG_USE_TERMINAL_FACE
+unsigned AudioCodec::GetPlaybackMouthLevel() const {
+    const auto value = playback_mouth_.load(std::memory_order_relaxed);
+    const auto ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    return ms - (value & ~3u) < 180 ? value & 3u : 0;
+}
+#endif
 
 bool AudioCodec::InputData(std::vector<int16_t>& data) {
     int samples = Read(data.data(), data.size());

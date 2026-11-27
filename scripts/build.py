@@ -575,6 +575,11 @@ def _build_option_definitions(
                 "choices": style_choices,
             },
             {
+                "key": "terminal_face",
+                "type": "boolean",
+                "default": assignments.get("CONFIG_USE_TERMINAL_FACE") == "y",
+            },
+            {
                 "key": "multiline_chat",
                 "type": "boolean",
                 "default": assignments.get("CONFIG_USE_MULTILINE_CHAT_MESSAGE") == "y",
@@ -688,6 +693,8 @@ def _normalize_build_options(
 
     if normalized.get("display_style") != "default" and "multiline_chat" in normalized:
         normalized["multiline_chat"] = False
+    if normalized.get("display_style") != "default" and "terminal_face" in normalized:
+        normalized["terminal_face"] = False
     return normalized
 
 
@@ -739,6 +746,9 @@ def _build_options_sdkconfig(
                 f"{symbol}={'y' if symbol == 'CONFIG_FLASH_DEFAULT_ASSETS' else 'n'}"
                 for symbol in flash_symbols
             )
+
+    if "terminal_face" in options:
+        result.append(f"CONFIG_USE_TERMINAL_FACE={'y' if options['terminal_face'] else 'n'}")
 
     if "multiline_chat" in options:
         result.append(f"CONFIG_USE_MULTILINE_CHAT_MESSAGE={'y' if options['multiline_chat'] else 'n'}")

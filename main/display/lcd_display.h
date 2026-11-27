@@ -36,6 +36,27 @@ protected:
 
     void InitializeLcdThemes();
     void ShowEmotion();
+#ifdef CONFIG_USE_TERMINAL_FACE
+    enum class Face { Hidden, Idle, Connecting, Listen, Think, Speak };
+    Face face_state_ = Face::Hidden;
+    lv_obj_t* face_root_ = nullptr;
+    lv_timer_t* face_timer_ = nullptr;
+    lv_obj_t* face_eyes_[2]{};
+    lv_obj_t* face_pupils_[2]{};
+    lv_obj_t* face_glints_[2]{};
+    lv_obj_t* face_dots_[15]{};
+    lv_obj_t* face_scratch_[3]{};
+    lv_obj_t* face_cheeks_[2]{};
+    uint32_t face_state_tick_ = 0;
+    uint32_t face_emotion_tick_ = 0;
+    uint32_t face_idle_delay_ = 6500;
+    unsigned face_gesture_ = 0;
+    unsigned face_emotion_ = 0;
+    bool face_system_message_ = false;
+    void SetupTerminalFace();
+    void UpdateTerminalFace();
+    void TrackTerminalMessage(const char* role, const char* content);
+#endif
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 
@@ -46,6 +67,9 @@ protected:
 
 public:
     ~LcdDisplay();
+#ifdef CONFIG_USE_TERMINAL_FACE
+    void SetStatus(const char* status) override;
+#endif
     virtual bool SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void RemoveChatMessage(const char* role, const char* content) override;

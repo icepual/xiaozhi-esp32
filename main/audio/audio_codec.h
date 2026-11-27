@@ -7,6 +7,9 @@
 #include <esp_idf_version.h>
 
 #include <vector>
+#ifdef CONFIG_USE_TERMINAL_FACE
+#include <atomic>
+#endif
 #include <string>
 #include <functional>
 
@@ -34,6 +37,9 @@ public:
     virtual void EnableInput(bool enable);
     virtual void EnableOutput(bool enable);
 
+#ifdef CONFIG_USE_TERMINAL_FACE
+    unsigned GetPlaybackMouthLevel() const;
+#endif
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
@@ -66,6 +72,11 @@ protected:
 
     virtual int Read(int16_t* dest, int samples) = 0;
     virtual int Write(const int16_t* data, int samples) = 0;
+
+#ifdef CONFIG_USE_TERMINAL_FACE
+private:
+    std::atomic<uint32_t> playback_mouth_{0};
+#endif
 };
 
 #endif // _AUDIO_CODEC_H

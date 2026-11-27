@@ -7,6 +7,14 @@
             "sdkconfig_append": [
                 "CONFIG_LCD_ST7789_240X320=y"
             ]
+        },
+        {
+            "name": "bread-compact-wifi-lcd-n16r8-terminal-154",
+            "sdkconfig_append": [
+                "CONFIG_LCD_ST7789_240X240=y",
+                "CONFIG_USE_DEFAULT_MESSAGE_STYLE=y",
+                "CONFIG_USE_TERMINAL_FACE=y"
+            ]
         }
     ]
 }
